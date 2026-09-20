@@ -1,52 +1,15 @@
-from pathlib import Path
-from dotenv import load_dotenv
-
-ENV_PATH = Path("C:/Users/tprit/PROJECTS/hackathon-agent/.env")
-load_dotenv(ENV_PATH)
-
+import json
+from typing import Any, Dict, List
 from google.adk.agents.llm_agent import Agent
-from .research_tools import search_web
-from .schemas import FinalIdeaSet
+from .config import GEMINI_MODEL
+from .schemas import FinalIdeaSet, HackathonProfile, OpportunityMap, ResearchSource
 
 
-INSTRUCTIONS = """
-You are the Hackathon Intelligence Agent.
+PLANNER_INSTRUCTIONS = """
+You are the Hackathon Research Planner.
+Your job is to analyze the hackathon brief, user idea, and constraints, extract the Hackathon Profile, and create a targeted search research plan.
 
-You are an opportunity intelligence and research agent for discovering,
-evaluating, and scoring high-impact hackathon project ideas.
-
-Your goal is to understand the opportunity space first, research external
-information when necessary, identify genuine gaps, generate candidates,
-red-team them, and return the strongest ideas.
-
-1. UNDERSTAND THE HACKATHON
-Extract: name, theme, problem_statements, required_technologies, allowed_technologies,
-restrictions, submission_requirements, judging_criteria, judging_weights,
-expected_novelty, expected_technical_depth, expected_impact, important_constraints,
-explicit_requirements, inferred_strategic_implications, opportunity_areas.
-
-2. RESEARCH
-Use search_web when external information is required (target users, workflows, pain points, competitors, market/workflow gaps).
-Research budget: maximum 8 search calls, maximum 5 results per search, maximum 20 useful sources.
-
-3. CANDIDATES & RED TEAM
-Generate internal candidates (10-15 candidates).
-Filter out generic, trivial, duplicate, or weak candidates.
-Challenge surviving ideas for differentiation, feasibility, and demo potential.
-
-4. SCORE & OUTPUT FORMAT
-Every candidate must receive 0-10 scores for:
-- hackathon_fit_score
-- impact_score
-- novelty_score
-- feasibility_score
-- demoability_score
-- research_potential_score
-
-Keep description strings concise (1-2 clear sentences per field).
-
-You MUST return your output strictly as a valid JSON object matching this structure:
-
+Output ONLY a valid JSON object matching this schema:
 {
   "hackathon_profile": {
     "name": "Hackathon Name",
@@ -66,10 +29,55 @@ You MUST return your output strictly as a valid JSON object matching this struct
     "inferred_strategic_implications": ["..."],
     "opportunity_areas": ["..."]
   },
+  "research_queries": [
+    "search query 1 for target users and pain points",
+    "search query 2 for existing competitors and solutions",
+    "search query 3 for technical approaches and limitations",
+    "search query 4 for market gaps"
+  ],
+  "research_focus": [
+    "target users",
+    "existing competitors",
+    "technical gaps"
+  ]
+}
+
+Provide max 5 targeted, highly relevant search queries. Avoid duplicate or vague queries.
+Do not include text outside the JSON object.
+"""
+
+SYNTHESIS_INSTRUCTIONS = """
+You are the Hackathon Opportunity Synthesizer.
+Your job is to synthesize compact research evidence and the hackathon profile into a structured Opportunity Map.
+
+Output ONLY a valid JSON object matching this schema:
+{
+  "target_users": ["..."],
+  "workflows": ["..."],
+  "pain_points": ["..."],
+  "existing_solutions": ["..."],
+  "technical_approaches": ["..."],
+  "market_workflow_gaps": ["..."],
+  "research_gaps": ["..."],
+  "evidence_source_ids": ["S1", "S2"]
+}
+
+Be concise and evidence-backed. Do not generate final project ideas yet.
+Do not include text outside the JSON object.
+"""
+
+CANDIDATE_INSTRUCTIONS = """
+You are the Hackathon Candidate Idea Generator and Critic.
+Given the Hackathon Profile and Opportunity Map, generate 8-10 candidate ideas internally, challenge them for feasibility, novelty, differentiation, and demo potential, and return the top requested N ideas.
+
+Output ONLY a valid JSON object matching this schema:
+{
+  "hackathon_profile": { ... },
+  "opportunity_map": { ... },
   "ideas": [
     {
       "title": "Project Title",
-      "one_line_summary": "Summary",
+      "one_line_summary": "Summary (1-2 sentences)",
       "target_user": "Target user",
       "problem": "Problem statement",
       "current_workflow": "Current workflow",
@@ -84,7 +92,7 @@ You MUST return your output strictly as a valid JSON object matching this struct
       "demoability": "Demoability",
       "research_potential": "Research potential",
       "risks": ["..."],
-      "evidence_or_reasoning": "Reasoning",
+      "evidence_or_reasoning": "Reasoning and evidence",
       "source_ids": ["S1"],
       "hackathon_fit_score": 8.5,
       "impact_score": 9.0,
@@ -103,18 +111,16 @@ You MUST return your output strictly as a valid JSON object matching this struct
       "evidence": "Evidence snippet"
     }
   ],
-  "rejected_ideas_summary": "Summary of rejected ideas"
+  "rejected_ideas_summary": "Summary of rejected generic/saturated candidates"
 }
 
 Do not include chain-of-thought or text outside the JSON object.
 """
 
-
 root_agent = Agent(
-    model="gemini-2.5-flash",
+    model=GEMINI_MODEL,
     name="hackathon_intelligence_agent",
     description="Researches hackathon opportunities and produces evidence-backed project ideas.",
-    instruction=INSTRUCTIONS,
-    tools=[search_web],
+    instruction=CANDIDATE_INSTRUCTIONS,
     output_schema=FinalIdeaSet,
 )

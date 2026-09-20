@@ -2,15 +2,12 @@ import json
 import re
 import sqlite3
 import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from .config import DB_PATH
 from .version import RESEARCH_VERSION, SCHEMA_VERSION
 
-DB_PATH = Path("C:/Users/tprit/PROJECTS/hackathon-agent/logs/cache.db")
-
-# Tracking parameters to strip from URLs
 TRACKING_PARAMS = {
     "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
     "utm_cid", "utm_reader", "fbclid", "gclid", "msclkid", "_ga", "_gi",
@@ -28,7 +25,6 @@ def canonicalize_url(url: str) -> str:
         netloc = parsed.netloc.lower()
         path = parsed.path.rstrip("/") if parsed.path != "/" else "/"
         
-        # Filter query params
         query_pairs = parse_qsl(parsed.query, keep_blank_values=False)
         filtered_pairs = [
             (k, v) for k, v in query_pairs if k.lower() not in TRACKING_PARAMS
@@ -109,7 +105,7 @@ init_db()
 
 
 def get_search_cache(
-    query: str, provider: str = "tavily", max_results: int = 5, version: str = RESEARCH_VERSION
+    query: str, provider: str = "tavily", max_results: int = 4, version: str = RESEARCH_VERSION
 ) -> Optional[List[Dict[str, Any]]]:
     norm_q = normalize_query(query)
     key = f"search:{provider}:{norm_q}:{max_results}:{version}"
@@ -127,7 +123,6 @@ def get_search_cache(
                 metrics.search_hits += 1
                 return json.loads(row["results"])
             else:
-                # Expired
                 conn.execute("DELETE FROM search_cache WHERE cache_key = ?", (key,))
                 conn.commit()
     except Exception:
@@ -143,8 +138,8 @@ def set_search_cache(
     query: str,
     results: List[Dict[str, Any]],
     provider: str = "tavily",
-    max_results: int = 5,
-    ttl_seconds: int = 86400 * 7, # 7 days default
+    max_results: int = 4,
+    ttl_seconds: int = 86400 * 7,
     version: str = RESEARCH_VERSION
 ) -> None:
     norm_q = normalize_query(query)
@@ -210,7 +205,7 @@ def set_request_cache(
     additional_context: Optional[str],
     num_ideas: int,
     result_data: Dict[str, Any],
-    ttl_seconds: int = 86400, # 24 hours default
+    ttl_seconds: int = 86400,
     version: str = SCHEMA_VERSION
 ) -> None:
     req_norm = f"{normalize_query(hackathon_text)}|{normalize_query(user_idea or '')}|{normalize_query(additional_context or '')}|{num_ideas}|{version}"

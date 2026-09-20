@@ -1,22 +1,23 @@
 import os
 import time
 import concurrent.futures
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from tavily import TavilyClient
+from .config import (
+    MAX_SEARCH_CALLS,
+    MAX_RESULTS_PER_SEARCH,
+    MAX_SELECTED_SOURCES,
+    MAX_SNIPPET_LENGTH,
+)
 from .research_cache import (
     canonicalize_url,
     get_search_cache,
     normalize_query,
     set_search_cache,
 )
-from .observability import RunTrace
-
-MAX_SEARCH_CALLS = 8
-MAX_RESULTS_PER_SEARCH = 5
-MAX_SELECTED_SOURCES = 20
-MAX_SNIPPET_LENGTH = 350
+from .observability import RunTrace, RunTraceEvent
 
 
 class ResearchTracker:
@@ -27,14 +28,16 @@ class ResearchTracker:
         self.sources_selected = 0
         self.seen_urls = set()
         self.active_trace: Optional[RunTrace] = None
+        self.event_callback = None
 
-    def reset(self, trace: Optional[RunTrace] = None):
+    def reset(self, trace: Optional[RunTrace] = None, event_callback = None):
         self.search_calls = 0
         self.sources_retrieved = 0
         self.sources_deduplicated = 0
         self.sources_selected = 0
         self.seen_urls.clear()
         self.active_trace = trace
+        self.event_callback = event_callback
 
     def to_dict(self) -> Dict[str, int]:
         return {
@@ -58,7 +61,7 @@ def compact_snippet(text: str, max_len: int = MAX_SNIPPET_LENGTH) -> str:
     return clean
 
 
-def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
+def search_web(query: str, max_results: int = 4) -> Dict[str, Any]:
     """
     Search the web for current information needed for hackathon research.
     Enforces caching, URL deduplication, and compact snippet formatting.
@@ -68,7 +71,7 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
     if tracker.search_calls >= MAX_SEARCH_CALLS:
         err_msg = f"Search limit reached ({MAX_SEARCH_CALLS} calls)."
         if tracker.active_trace:
-            tracker.active_trace.record_tool_call(
+            _, ev = tracker.active_trace.record_tool_call(
                 tool_name="search_web",
                 args={"query": query, "max_results": max_results},
                 results=[],
@@ -76,6 +79,8 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
                 duration_ms=(time.perf_counter() - t0) * 1000.0,
                 error=err_msg
             )
+            if tracker.event_callback:
+                tracker.event_callback(ev)
         return {
             "success": False,
             "query": query,
@@ -104,13 +109,15 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
         dur = (time.perf_counter() - t0) * 1000.0
 
         if tracker.active_trace:
-            tracker.active_trace.record_tool_call(
+            _, ev = tracker.active_trace.record_tool_call(
                 tool_name="search_web",
                 args={"query": query, "max_results": max_results},
                 results=deduped,
                 cache_status="HIT",
                 duration_ms=dur
             )
+            if tracker.event_callback:
+                tracker.event_callback(ev)
 
         return {"success": True, "query": query, "results": deduped, "cached": True}
 
@@ -120,7 +127,7 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
         err_msg = "TAVILY_API_KEY is not configured."
         dur = (time.perf_counter() - t0) * 1000.0
         if tracker.active_trace:
-            tracker.active_trace.record_tool_call(
+            _, ev = tracker.active_trace.record_tool_call(
                 tool_name="search_web",
                 args={"query": query, "max_results": max_results},
                 results=[],
@@ -128,6 +135,8 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
                 duration_ms=dur,
                 error=err_msg
             )
+            if tracker.event_callback:
+                tracker.event_callback(ev)
         return {
             "success": False,
             "query": query,
@@ -179,13 +188,15 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
         dur = (time.perf_counter() - t0) * 1000.0
 
         if tracker.active_trace:
-            tracker.active_trace.record_tool_call(
+            _, ev = tracker.active_trace.record_tool_call(
                 tool_name="search_web",
                 args={"query": query, "max_results": max_results},
                 results=results,
                 cache_status="MISS",
                 duration_ms=dur
             )
+            if tracker.event_callback:
+                tracker.event_callback(ev)
 
         return {"success": True, "query": query, "results": results, "cached": False}
 
@@ -193,7 +204,7 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
         dur = (time.perf_counter() - t0) * 1000.0
         err_str = str(exc)
         if tracker.active_trace:
-            tracker.active_trace.record_tool_call(
+            _, ev = tracker.active_trace.record_tool_call(
                 tool_name="search_web",
                 args={"query": query, "max_results": max_results},
                 results=[],
@@ -201,6 +212,8 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
                 duration_ms=dur,
                 error=err_str
             )
+            if tracker.event_callback:
+                tracker.event_callback(ev)
         return {
             "success": False,
             "query": query,
@@ -209,7 +222,7 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
         }
 
 
-def search_web_batch(queries: List[str], max_results: int = 5) -> List[Dict[str, Any]]:
+def search_web_batch(queries: List[str], max_results: int = 4) -> List[Dict[str, Any]]:
     """Execute multiple independent searches concurrently."""
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries) or 1) as executor:

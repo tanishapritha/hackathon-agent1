@@ -4,11 +4,12 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 
-ENV_PATH = Path("C:/Users/tprit/PROJECTS/hackathon-agent/.env")
+PROJECT_ROOT = Path(__file__).resolve().parent
+ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(ENV_PATH)
 
 from hackathon_intelligence.schemas import HackathonRequest
-from runner import run_hackathon_agent_sync
+from hackathon_intelligence.runner import run_hackathon_agent_sync
 
 def main():
     print("==================================================")
@@ -17,7 +18,7 @@ def main():
 
     test_inputs = [
         {
-            "name": "Benchmark 1: Healthcare AI Hackathon",
+            "name": "TEST 1: Healthcare AI Hackathon (Uncached)",
             "request": HackathonRequest(
                 hackathon_text="Build innovative AI solutions for healthcare. Focus areas: clinical workflow optimization, medical imaging support, administrative burden reduction, and patient engagement. Track: Healthcare Innovation.",
                 user_idea="Radiology report auto-summarizer and anomaly detector",
@@ -26,7 +27,7 @@ def main():
             )
         },
         {
-            "name": "Benchmark 2: DevTools & Infra Hackathon",
+            "name": "TEST 2: DevTools & Infra Hackathon",
             "request": HackathonRequest(
                 hackathon_text="Developer tools hackathon focused on AI agent observability, latency optimization, schema validation, and evaluation frameworks for production LLM pipelines.",
                 user_idea="Real-time agent debugger and prompt tracing toolkit",
@@ -35,7 +36,7 @@ def main():
             )
         },
         {
-            "name": "Benchmark 3: Sustainability & Climate Tech Hackathon",
+            "name": "TEST 3: Sustainability & Climate Tech Hackathon",
             "request": HackathonRequest(
                 hackathon_text="Hackathon focused on climate change mitigation, scope 3 carbon tracking, renewable energy forecasting, and circular economy market solutions.",
                 user_idea="Supply chain carbon footprint estimator",
@@ -44,10 +45,19 @@ def main():
             )
         },
         {
-            "name": "Benchmark 4: Repeated Request (Cache Hit Test)",
+            "name": "TEST 4: Repeat TEST 1 Exactly (Request Cache HIT)",
             "request": HackathonRequest(
                 hackathon_text="Build innovative AI solutions for healthcare. Focus areas: clinical workflow optimization, medical imaging support, administrative burden reduction, and patient engagement. Track: Healthcare Innovation.",
                 user_idea="Radiology report auto-summarizer and anomaly detector",
+                additional_context="Must use privacy-compliant workflows and open-source models.",
+                num_ideas=5
+            )
+        },
+        {
+            "name": "TEST 5: Same Hackathon, Different Idea (Research Cache Reuse)",
+            "request": HackathonRequest(
+                hackathon_text="Build innovative AI solutions for healthcare. Focus areas: clinical workflow optimization, medical imaging support, administrative burden reduction, and patient engagement. Track: Healthcare Innovation.",
+                user_idea="Clinical trial patient matching and eligibility verification",
                 additional_context="Must use privacy-compliant workflows and open-source models.",
                 num_ideas=5
             )
@@ -60,30 +70,31 @@ def main():
         print(f"\nRunning {item['name']}...")
         start = time.perf_counter()
         try:
-            ideas_set, metrics = run_hackathon_agent_sync(item["request"])
+            ideas_set, trace = run_hackathon_agent_sync(item["request"])
             dur = time.perf_counter() - start
             results.append({
                 "name": item["name"],
-                "status": metrics.get("status"),
+                "status": trace.status,
                 "ideas_count": len(ideas_set.ideas),
                 "sources_count": len(ideas_set.sources),
                 "duration_s": round(dur, 2),
-                "duration_ms": metrics.get("duration_ms"),
-                "llm_calls": metrics.get("llm_calls"),
-                "tool_calls": metrics.get("tool_calls"),
-                "cache_hits": metrics.get("cache_hits"),
-                "cache_misses": metrics.get("cache_misses"),
-                "search_calls": metrics.get("search_calls"),
-                "sources_retrieved": metrics.get("sources_retrieved"),
-                "sources_deduplicated": metrics.get("sources_deduplicated"),
-                "sources_selected": metrics.get("sources_selected"),
-                "prompt_tokens": metrics.get("prompt_tokens"),
-                "output_tokens": metrics.get("output_tokens"),
-                "total_tokens": metrics.get("total_tokens"),
-                "retries": metrics.get("retries"),
-                "validation_failures": metrics.get("validation_failures"),
+                "duration_ms": trace.duration_ms,
+                "llm_calls": trace.token_usage.llm_calls_count,
+                "tool_calls": trace.tool_calls_count,
+                "search_calls": trace.search_calls_count,
+                "cache_hits": trace.research_metrics.cache_hits,
+                "cache_misses": trace.research_metrics.cache_misses,
+                "request_cache_hit": trace.cache_metrics.request_cache_hit,
+                "sources_retrieved": trace.research_metrics.results_retrieved,
+                "sources_deduplicated": trace.research_metrics.duplicates_removed,
+                "sources_selected": trace.research_metrics.sources_selected,
+                "prompt_tokens": trace.token_usage.prompt_tokens,
+                "output_tokens": trace.token_usage.output_tokens,
+                "total_tokens": trace.token_usage.total_tokens,
+                "retries": trace.errors.retries,
+                "validation_failures": trace.errors.validation_failures,
             })
-            print(f"-> SUCCESS ({len(ideas_set.ideas)} ideas in {dur:.2f}s)")
+            print(f"-> SUCCESS ({len(ideas_set.ideas)} ideas, {trace.token_usage.llm_calls_count} Gemini calls in {dur:.2f}s)")
         except Exception as exc:
             print(f"-> FAILED: {exc}")
             results.append({
@@ -97,7 +108,7 @@ def main():
     print("==================================================")
     print(json.dumps(results, indent=2))
 
-    benchmark_file = Path("C:/Users/tprit/PROJECTS/hackathon-agent/logs/benchmark_results.json")
+    benchmark_file = PROJECT_ROOT / "logs" / "benchmark_results.json"
     benchmark_file.parent.mkdir(parents=True, exist_ok=True)
     with open(benchmark_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

@@ -4,16 +4,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-
-LOG_DIR = Path("C:/Users/tprit/PROJECTS/hackathon-agent/logs")
-LOG_FILE = LOG_DIR / "run_logs.jsonl"
+from .config import LOG_FILE, LOG_DIR
 
 
 def redact_secrets(text: Optional[str]) -> Optional[str]:
     """Redact any API key patterns from log strings."""
     if not text:
         return text
-    # Redact Google/Gemini API key patterns
     redacted = re.sub(r'AIza[A-Za-z0-9_-]{30,}', '[REDACTED_API_KEY]', text)
     redacted = re.sub(r'AQ\.[A-Za-z0-9_-]{30,}', '[REDACTED_API_KEY]', redacted)
     redacted = re.sub(r'(?:api[_-]?key|secret)["\s:]+["\']?([A-Za-z0-9_-]{20,})["\']?', '[REDACTED_API_KEY]', redacted, flags=re.IGNORECASE)
@@ -39,7 +36,7 @@ def log_run(
     total_tokens: Optional[int] = None,
     retries: int = 0,
     validation_failures: int = 0,
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-3.6-flash",
     error: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Write structured JSON log entry for a completed run. Ensures zero secret leakage."""

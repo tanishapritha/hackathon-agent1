@@ -2,10 +2,27 @@ import json
 import re
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 from .logger import redact_secrets
+
+
+class RunTraceEvent(BaseModel):
+    type: str  # "stage", "llm_call", "tool_call", "cache_hit", "ranking", "complete", "error"
+    timestamp: str
+    stage: Optional[str] = None
+    tool_name: Optional[str] = None
+    model: Optional[str] = None
+    args: Dict[str, Any] = Field(default_factory=dict)
+    result_count: int = 0
+    cache_status: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    duration_ms: float = 0.0
+    message: Optional[str] = None
+    error: Optional[str] = None
 
 
 class ToolCallTrace(BaseModel):
@@ -15,7 +32,7 @@ class ToolCallTrace(BaseModel):
     sanitized_args: Dict[str, Any]
     result_count: int = 0
     compact_evidence: List[Dict[str, str]] = Field(default_factory=list)
-    cache_status: str = "MISS"  # "HIT" or "MISS"
+    cache_status: str = "MISS"
     duration_ms: float = 0.0
     error: Optional[str] = None
 
@@ -24,7 +41,7 @@ class StageTrace(BaseModel):
     name: str
     timestamp: str
     duration_ms: float = 0.0
-    status: str = "completed"  # "completed" | "failed" | "skipped"
+    status: str = "completed"
 
 
 class TokenUsageTrace(BaseModel):
@@ -81,13 +98,12 @@ class ErrorMetricsTrace(BaseModel):
 
 class RunTrace(BaseModel):
     run_id: str
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-3.6-flash"
     status: str = "pending"
     duration_ms: float = 0.0
     requested_ideas: int = 5
     returned_ideas: int = 0
     
-    # Core engineering metrics
     tool_calls_count: int = 0
     search_calls_count: int = 0
     
@@ -107,10 +123,9 @@ class RunTrace(BaseModel):
         cache_status: str,
         duration_ms: float,
         error: Optional[str] = None
-    ) -> ToolCallTrace:
+    ) -> Tuple[ToolCallTrace, RunTraceEvent]:
         self.tool_calls_count += 1
         
-        # Categorize per-tool search calls
         if "search" in tool_name.lower():
             self.search_calls_count += 1
             if "github" in tool_name.lower():
@@ -120,15 +135,13 @@ class RunTrace(BaseModel):
             else:
                 self.research_metrics.search_web_calls += 1
 
-        # Sanitize arguments (remove secrets)
         sanitized_args = {}
         for k, v in args.items():
             if "key" in k.lower() or "secret" in k.lower() or "token" in k.lower():
                 sanitized_args[k] = "[REDACTED]"
             else:
-                sanitized_args[k] = str(v)[:200]
+                sanitized_args[k] = redact_secrets(str(v)[:200])
 
-        # Compact evidence format
         compact_ev = []
         for item in results[:5]:
             compact_ev.append({
@@ -138,9 +151,10 @@ class RunTrace(BaseModel):
                 "snippet": redact_secrets(str(item.get("snippet") or item.get("evidence") or "")[:200]),
             })
 
+        now_str = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
         trace_item = ToolCallTrace(
             seq_num=len(self.tool_calls) + 1,
-            timestamp=datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3],
+            timestamp=now_str,
             tool_name=tool_name,
             sanitized_args=sanitized_args,
             result_count=len(results),
@@ -155,15 +169,56 @@ class RunTrace(BaseModel):
         if error:
             self.errors.tool_errors += 1
 
-        return trace_item
+        event = RunTraceEvent(
+            type="tool_call",
+            timestamp=now_str,
+            tool_name=tool_name,
+            args=sanitized_args,
+            result_count=len(results),
+            cache_status=cache_status,
+            duration_ms=round(duration_ms, 2),
+            error=redact_secrets(error)
+        )
 
-    def record_stage(self, name: str, duration_ms: float = 0.0, status: str = "completed"):
+        return trace_item, event
+
+    def record_stage(self, name: str, duration_ms: float = 0.0, status: str = "completed") -> RunTraceEvent:
+        now_str = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
         self.stages.append(StageTrace(
             name=name,
-            timestamp=datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3],
+            timestamp=now_str,
             duration_ms=round(duration_ms, 2),
             status=status
         ))
+        return RunTraceEvent(
+            type="stage",
+            timestamp=now_str,
+            stage=name,
+            duration_ms=round(duration_ms, 2),
+            message=f"✓ {name}"
+        )
+
+    def record_llm_call(
+        self,
+        call_num: int,
+        prompt_tokens: int,
+        output_tokens: int,
+        total_tokens: int,
+        duration_ms: float,
+        purpose: str
+    ) -> RunTraceEvent:
+        self.token_usage.accumulate(prompt_tokens, output_tokens, total_tokens)
+        now_str = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+        return RunTraceEvent(
+            type="llm_call",
+            timestamp=now_str,
+            model=self.model,
+            input_tokens=prompt_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens if total_tokens > 0 else (prompt_tokens + output_tokens),
+            duration_ms=round(duration_ms, 2),
+            message=f"🧠 {self.model} · Call {call_num}/4 ({purpose})"
+        )
 
     def to_sanitized_export_json(self) -> str:
         """Return clean JSON string without secrets for UI export."""
