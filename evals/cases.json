@@ -1,0 +1,20 @@
+[
+  {
+    "id": "healthcare_workflow",
+    "brief": "Build AI solutions for healthcare workflows. Judges score innovation, technical implementation, impact, UX and feasibility. Generic AI assistants are discouraged.",
+    "constraints": "2-person team, 48 hours, working demo required.",
+    "quality_checks": ["specific target user", "evidence-backed workflow", "existing-solution awareness", "meaningful AI role", "demoable"]
+  },
+  {
+    "id": "climate_operations",
+    "brief": "Use AI to improve climate resilience and operational decision-making. Working prototype and measurable impact are required.",
+    "constraints": "Small team, limited access to proprietary data.",
+    "quality_checks": ["data feasibility", "current workflow", "technical novelty", "impact", "source-backed claims"]
+  },
+  {
+    "id": "fintech_inclusion",
+    "brief": "Build responsible AI products that improve access to financial services. Privacy, safety and feasibility are judged heavily.",
+    "constraints": "Prototype must use synthetic or public data.",
+    "quality_checks": ["responsible AI", "clear user pain", "privacy", "feasibility", "competitor awareness"]
+  }
+]

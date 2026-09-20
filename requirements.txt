@@ -1,0 +1,10 @@
+google-adk
+pydantic
+tavily-python
+pymupdf
+fastapi
+uvicorn
+python-multipart
+pytest
+streamlit
+python-dotenv
